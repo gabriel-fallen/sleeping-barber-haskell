@@ -1,6 +1,7 @@
 module Main where
 
 import Control.Concurrent
+import Control.Concurrent.Chan
 import Control.Concurrent.MVar
 
 
@@ -8,37 +9,34 @@ newtype Client = Client Int
 
 maxlen = 5
 
-mythread :: MVar [Client] -> IO ()
-mythread queue = do
+mythread :: Chan Client -> MVar Int -> IO ()
+mythread queue counter = do
 	putStrLn "Barber checks queue"
-	((Client delay):rest) <- takeMVar queue
-	if null rest
-		then do
-			threadDelay delay
-			putStrLn "Client is ready"
-			mythread queue
-		else do
-			putMVar queue rest
-			threadDelay delay
-			putStrLn "Client is ready"
-			mythread queue
+	(Client delay) <- readChan queue
+	threadDelay delay
+	modifyMVar_ counter (\i -> return $ i-1)
+	putStrLn "Client is ready"
+	mythread queue counter
 
-
-controller :: MVar [Client] -> IO ()
-controller queue = do
+controller :: Chan Client -> MVar Int -> IO ()
+controller queue counter = do
 	threadDelay 500
 	let client = Client 800
-	isEmpty <- isEmptyMVar queue
-	if isEmpty
-		then putMVar queue [client] >> controller queue
+	i <- takeMVar counter
+	if i < maxlen
+		then do
+			writeChan queue client
+			putMVar counter $ i + 1
 		else do
-			q <- takeMVar queue
-			if (length q) >= maxlen
-				then putMVar queue q >> controller queue
-				else putMVar queue (q ++ [client]) >> controller queue
+			putMVar counter i
+			putStrLn "Queue is full"
+	controller queue counter
 
 main = do
-	queue <- newEmptyMVar :: IO (MVar [Client])
-	forkIO $ mythread queue
+	queue <- newChan
+	counter <- newMVar 0
+	forkIO $ mythread queue counter
 	putStrLn $ "Starting client producement"
-	controller queue
+	controller queue counter
+
+
